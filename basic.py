@@ -1,9 +1,8 @@
 import time
 
 
-def do_work(s: str):
-    delay_s = 1
-
+def do_work(s: str, delay_s: float = 1.0):
+    print(f"{s} started")
     time.sleep(delay_s)
     print(f"{s} done")
 
