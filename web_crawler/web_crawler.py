@@ -1,7 +1,9 @@
-import time
-import asyncio
-import html
+from __future__ import annotations
 
+import asyncio
+import html.parser
+import pathlib
+import time
 import urllib.parse
 from typing import Callable, Iterable
 
@@ -12,11 +14,11 @@ class UrlFilterer:
     def __init__(
         self,
         allowed_domains: set[str] | None = None,
-        allowed_schemas: set[str] | None = None,
+        allowed_schemes: set[str] | None = None,
         allowed_filetypes: set[str] | None = None,
     ):
         self.allowed_domains = allowed_domains
-        self.allowed_schemas = allowed_schemas
+        self.allowed_schemes = allowed_schemes
         self.allowed_filetypes = allowed_filetypes
 
     def filter_url(self, base: str, url: str) -> str | None:
@@ -24,8 +26,8 @@ class UrlFilterer:
         url, _frag = urllib.parse.urldefrag(url)
         parsed = urllib.parse.urlparse(url)
         if (
-            self.allowed_schemas is not None
-            and parsed.scheme not in self.allowed_schemas
+            self.allowed_schemes is not None
+            and parsed.scheme not in self.allowed_schemes
         ):
             return None
         if (
@@ -39,7 +41,7 @@ class UrlFilterer:
         return url
 
 
-class UrlParser(html.parse.HTMLParser):
+class UrlParser(html.parser.HTMLParser):
     def __init__(self, base: str, filter_url: Callable[[str, str], str | None]):
         super().__init__()
         self.base = base
@@ -47,12 +49,14 @@ class UrlParser(html.parse.HTMLParser):
         self.found_links = set()
 
     def handle_starttag(self, tag: str, attrs):
+        # look for <a href="...">
         if tag != "a":
             return
 
         for attr, url in attrs:
             if attr != "href":
                 continue
+
             if (url := self.filter_url(self.base, url)) is not None:
                 self.found_links.add(url)
 
@@ -79,7 +83,7 @@ class Crawler:
         self.total = 0
 
     async def run(self):
-        await self.on_found_links(self.start_urls)  # prime the Queue
+        await self.on_found_links(self.start_urls)  # prime the queue
         workers = [asyncio.create_task(self.worker()) for _ in range(self.num_workers)]
         await self.todo.join()
 
@@ -97,7 +101,7 @@ class Crawler:
         url = await self.todo.get()
         try:
             await self.crawl(url)
-        except Exception:
+        except Exception as exc:
             # retry handling here...
             pass
         finally:
@@ -141,31 +145,49 @@ class Crawler:
 
 async def main():
     filterer = UrlFilterer(
-        allowed_domains={"www.raelldottin.com"},
-        allowed_schemas={"http", "https"},
+        allowed_domains={"mcoding.io"},
+        allowed_schemes={"http", "https"},
         allowed_filetypes={".html", ".php", ""},
     )
 
-    start = time.pref_counter()
+    start = time.perf_counter()
     async with httpx.AsyncClient() as client:
         crawler = Crawler(
             client=client,
-            urls=["https://www.raelldottin.com"],
-            filter_url=filter.filter_url,
+            urls=["https://mcoding.io/"],
+            filter_url=filterer.filter_url,
             workers=5,
-            limit=30,
+            limit=25,
         )
         await crawler.run()
-    end = time.pref_counter()
+    end = time.perf_counter()
 
     seen = sorted(crawler.seen)
     print("Results:")
     for url in seen:
         print(url)
-    print(f"Crawled: {len(crawler.down)} URLs")
+    print(f"Crawled: {len(crawler.done)} URLs")
     print(f"Found: {len(seen)} URLs")
-    print(f"Done in {end - start: .2f}s")
+    print(f"Done in {end - start:.2f}s")
 
 
 if __name__ == "__main__":
-    asyncio.run(main(), debu=True)
+    asyncio.run(main(), debug=True)
+
+
+async def homework():
+    """
+    Ideas for you to implement to test your understanding:
+    - Respect robots.txt *IMPORTANT*
+    - Find all links in sitemap.xml
+    - Provide a user agent
+    - Normalize urls (make sure not to count mcoding.io and mcoding.io/ as separate)
+    - Skip filetypes (jpg, pdf, etc.) or include only filetypes (html, php, etc.)
+    - Max depth
+    - Max concurrent connections per domain
+    - Rate limiting
+    - Rate limiting per domain
+    - Store connections as graph
+    - Store results to database
+    - Scale
+    """
